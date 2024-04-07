@@ -1,0 +1,24 @@
+
+    # Update stock availability
+    def update_stock(self):
+        # Connect to the server and request stock information
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+                client_socket.connect(('100.70.136.78', 12348))
+                client_socket.sendall(b'get_stock_info')
+                stock_info_str = client_socket.recv(1024).decode()
+                print("Received stock information from server:", stock_info_str)
+                stock_info = dict(item.split(": ") for item in stock_info_str.split(", "))
+                print("Parsed stock information:", stock_info)
+
+                # Clear any existing stock information in the GUI
+                self.clear_stock_display()
+
+                # Update the GUI with the retrieved stock information
+                for item_id, item_quantity in stock_info.items():
+                    # Create labels to display item ID and quantity
+                    item_label = tk.Label(self, text=f"Item ID: {item_id}, Quantity: {item_quantity}")
+                    item_label.pack()
+
+        except Exception as e:
+            print("Error:", e)
