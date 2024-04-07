@@ -19,24 +19,32 @@ def get_stock_info_from_database(connection):
 
 
 def process_transaction(connection, client_socket, transaction_data):
-    # try is error handling in Python - contains code I wish compiler to execute
     try:
-        drink_id, quantity = map(int, transaction_data.split(','))  # extract drink_id and quantity from string 'transaction_data'
-        cursor = connection.cursor()  # cursors used to execute SQL queries and aid connection to database
-        cursor.execute("SELECT Stock_Quantity FROM drinks_program WHERE DrinkID = %s", (drink_id,))  # execute SQL command with conditional WHERE statement. Drink ID is a tuple
-        current_stock = cursor.fetchone()[0]  # get first row of query result, result is a single value for stock quantity
+        # Split the transaction data into individual transactions
+        transactions = [transaction.split(',') for transaction in transaction_data.split(';')]
 
-        if current_stock < quantity:  # if logic - if current stock is less than quantity
-            client_socket.sendall(b'Insufficient stock.')  # client socket will return the message of Insufficient Stock
-        else:  # if the above is not true then..
-            new_stock = current_stock - quantity  # minus current stock from quantity in database query
-            cursor.execute("UPDATE drinks_program SET Stock_Quantity = %s WHERE DrinkID = %s", (new_stock, drink_id))   # execute SQL update query to update data in database table
-            connection.commit()
-            client_socket.sendall(b'Transaction processed successfully.')
+        cursor = connection.cursor()
 
+        for drink_id, quantity in transactions:
+            drink_id = int(drink_id)
+            quantity = int(quantity)
+
+            cursor.execute("SELECT Stock_Quantity FROM drinks_program WHERE DrinkID = %s", (drink_id,))
+            current_stock = cursor.fetchone()[0]
+
+            if current_stock < quantity:
+                client_socket.sendall(b'Insufficient stock.')
+                return  # Exit the function if any transaction fails due to insufficient stock
+
+            new_stock = current_stock - quantity
+            cursor.execute("UPDATE drinks_program SET Stock_Quantity = %s WHERE DrinkID = %s", (new_stock, drink_id))
+
+        connection.commit()
+        client_socket.sendall(b'Transaction processed successfully.')
     except Exception as e:
         print("Error processing transaction:", e)
         client_socket.sendall(b'Failed to process transaction.')
+
 
 def update_stock(connection, client_socket):
     try:
@@ -49,7 +57,7 @@ def update_stock(connection, client_socket):
         print("Error updating stock:", e)
 
 def main():
-    server_address = ('100.70.136.78', 12348)
+    server_address = ('172.20.10.4', 55000)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind(server_address)
@@ -76,6 +84,7 @@ def main():
 
                 while True:
                     data = client_socket.recv(1024)
+                    print(data)
                     if not data:
                         break
                     request = data.decode().split(maxsplit=1)  # Split at most once to separate command from data
@@ -88,10 +97,13 @@ def main():
                         if len(request) == 2:
                             transaction_data = request[1]
                             process_transaction(database_connection, client_socket, transaction_data)
+                            print(transaction_data)
                         else:
                             client_socket.sendall(b'Missing transaction data.')
+                            print("Missing transaction data")
                     else:
                         client_socket.sendall(b'Invalid command.')
+                        print("Invalid command")
 
 if __name__ == "__main__":
     main()

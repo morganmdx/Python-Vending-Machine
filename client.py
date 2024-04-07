@@ -1,4 +1,6 @@
+import threading
 import tkinter as tk
+import traceback
 from tkinter import ttk
 from tkinter import messagebox
 import mysql.connector
@@ -7,6 +9,10 @@ import socket
 import time
 from datetime import datetime
 
+server_address = ('172.20.10.4', 55000)
+# Connect to the server
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.connect(server_address)
 
 class BaseWindow(tk.Tk):
     def __init__(self, *args, **kwargs):
@@ -155,6 +161,27 @@ class BasketWindow(tk.Toplevel):
 
         self.update_basket()
 
+    def send_transaction(self, transaction_with_card_details):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+                server_socket.connect(server_address)
+                server_socket.sendall(f"process_transaction {transaction_with_card_details}".encode())
+                response = server_socket.recv(1024).decode()
+                print("Server response:", response)
+
+                # Handle the response from the server
+                if response == 'Transaction processed successfully.':
+                    messagebox.showinfo("Successful!", "All good, payment successful")
+                    self.checkout_window.destroy()
+                    self.basket_items.clear()  # Clear basket after successful purchase
+                    self.update_basket()
+                else:
+                    messagebox.showerror("Error", "Failed to process transaction.")
+        except Exception as e:
+            # Print the full traceback of the exception
+            traceback.print_exc()
+            messagebox.showerror("Error", "An error occurred while processing the transaction.")
+
     # Move the process_transaction method here
     def process_transaction(self, drink_id, quantity):
         try:
@@ -274,9 +301,6 @@ class BasketWindow(tk.Toplevel):
             print("Error connecting to MySQL:", error)
 
         # Fetch drink names from the database based on drink IDs
-        server_address = ('100.70.136.78', 12348)
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.connect(server_address)
         cursor = self.connection.cursor()
         drink_names = {}
         for item in self.basket_items:
@@ -287,49 +311,30 @@ class BasketWindow(tk.Toplevel):
                 drink_names[drink_id] = result[0]
         cursor.close()
 
-        # Update stock quantity for each purchased product in the database
-        for item in self.basket_items:
-            print("Item:", item)  # Add this line for debugging
-            if len(item) >= 4:  # Check if item contains at least four values
-                drink_id, _, _, price, quantity = item  # Unpack all five values
-                # Ensure quantity is an integer
-                quantity = int(quantity)
+        # Prepare transaction data for all items in the basket
+        transaction_data = ";".join([f"{item[0]},{item[4]}" for item in self.basket_items])
 
-                # Write the transaction details to the "transactions.txt" file
-                try:
-                    with open("transactions.txt", "a") as f:
-                        # Format: Date,DrinkName,Quantity,TotalPrice
-                        for item in self.basket_items:
-                            drink_id, _, _, price, quantity = item
-                            drink_name = drink_names.get(drink_id, 'Unknown')
-                            total_price = price * quantity
-                            transaction_data = f"{current_date_time},{drink_name},{quantity},{total_price}\n"
-                            f.write(transaction_data)
-                    print("Transaction details written to file successfully.")
-                except Exception as e:
-                    print("Error writing transaction details to file:", e)
+        # Write the transaction details to the "transactions.txt" file
+        try:
+            with open("transactions.txt", "a") as f:
+                for item in self.basket_items:
+                    drink_id, _, _, price, quantity = item
+                    drink_name = drink_names.get(drink_id, 'Unknown')
+                    total_price = price * quantity
+                    transaction_entry = f"{current_date_time},{drink_name},{quantity},{total_price}\n"
+                    f.write(transaction_entry)
+                    print(transaction_entry)
+            print("Transaction details written to file successfully.")
+        except Exception as e:
+            print("Error writing transaction details to file:", e)
+            return
 
-                # Print transaction data for debugging
-                transaction_data = f"{drink_id},{quantity}"
-                print("Transaction Data:", transaction_data)
+        # Send the transaction data along with card details to the server
+        # threading.Thread(target=self.send_transaction_thread, args=(transaction_with_card_details,)).start()
+        self.send_transaction(transaction_data)  # Call send_transaction directly
 
-                # Send the transaction data to the server in the format "drink_id,quantity"
-                success = self.process_transaction(drink_id, quantity)  # Call the method directly
-                if success:
-                    messagebox.showinfo("Successful!", "All good, payment successful")
-                    self.checkout_window.destroy()
-                if not success:
-                    # Handle the case where the transaction fails
-                    messagebox.showerror("Error", "Failed to process transaction.")
-                    print(success)
-                    return
-            else:
-                print("Invalid item in basket:", item)  # Handle the case of an invalid item
-                print(success)
-
-        # Clear basket after successful purchase
-        self.basket_items.clear()
-        self.update_basket()
+        # Close the database connection
+        self.connection.close()
 
     def checkout(self):
         # Create a new window for card details entry
@@ -490,10 +495,6 @@ class VendingMachineApp(BaseWindow):
         self.connection.commit()
 
     def create_widgets(self):
-        # Connect to the server
-        server_address = ('100.70.136.78', 12348)
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.connect(server_address)
 
         # Add label to display stock information
         self.drink_labels = []  # Initialize drink labels list
